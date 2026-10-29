@@ -10,7 +10,7 @@ st.set_page_config(
 )
 
 # Constants & Paths
-DATA_URL = "https://raw.githubusercontent.com/marcon0821/data/refs/main/stroke.csv"
+DATA_URL = "https://raw.githubusercontent.com/marcon0821/data/refs/heads/main/stroke.csv"
 SAVE_DIR = "내_기록"
 SAVE_FILE = os.path.join(SAVE_DIR, "data_info.json")
 
