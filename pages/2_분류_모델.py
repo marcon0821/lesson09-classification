@@ -6,7 +6,7 @@ import streamlit as st
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.preprocessing import StandardScaler
-from sklearn.tree import DecisionTreeClassifier
+from sklearn.tree import DecisionTreeClassifier, export_graphviz
 
 # 1. 페이지 설정
 st.set_page_config(
@@ -79,11 +79,8 @@ if len(selected_korean_features) < 2:
 selected_features = [reverse_feature_mapping[k] for k in selected_korean_features]
 
 # 4. 데이터 전처리 (결측치 처리 및 분할 규칙 적용)
-# 체질량지수(bmi)가 선택되었고 결측치가 있는 경우 훈련용 중앙값으로 채우기
-# 데이터 정렬 (번호 순)
 df_sorted = df.sort_values(by="id").reset_index(drop=True)
 
-# 10명씩 묶어서 앞 3명은 테스트, 나머지 7명은 훈련용으로 분할
 test_indices = []
 train_indices = []
 
@@ -98,13 +95,12 @@ for i in range(0, len(df_sorted), 10):
 df_train = df_sorted.loc[train_indices].copy()
 df_test = df_sorted.loc[test_indices].copy()
 
-# bmi 결측치 처리: 훈련 데이터의 bmi 중앙값으로 훈련/테스트 데이터 채우기
+# bmi 결측치 처리: 훈련 데이터의 bmi 중앙값으로 채우기
 if "bmi" in selected_features:
     bmi_median = df_train["bmi"].median()
     df_train["bmi"] = df_train["bmi"].fillna(bmi_median)
     df_test["bmi"] = df_test["bmi"].fillna(bmi_median)
 
-# X, y 분리 (stroke=1을 양성, 0을 음성으로 둠)
 X_train = df_train[selected_features]
 y_train = df_train["stroke"]
 
@@ -124,7 +120,7 @@ log_reg.fit(X_train_scaled, y_train)
 log_train_acc = accuracy_score(y_train, log_reg.predict(X_train_scaled))
 log_test_acc = accuracy_score(y_test, log_reg.predict(X_test_scaled))
 
-# 2) 의사결정트리 모델 (질문 3번 제한, 마디당 최소 샘플 5명 미만 분할 금지, 난수 고정)
+# 2) 의사결정트리 모델
 dt_clf = DecisionTreeClassifier(
     max_depth=3, min_samples_leaf=5, random_state=42
 )
@@ -133,7 +129,7 @@ dt_clf.fit(X_train, y_train)
 dt_train_acc = accuracy_score(y_train, dt_clf.predict(X_train))
 dt_test_acc = accuracy_score(y_test, dt_clf.predict(X_test))
 
-# 3) 베이스라인 모델 (입력을 전혀 보지 않고 훈련용에서 다수 클래스로만 답하는 모델)
+# 3) 베이스라인 모델 (다수 클래스 기준)
 majority_class = y_train.mode()[0]
 dummy_train_preds = np.full_like(y_train, majority_class)
 dummy_test_preds = np.full_like(y_test, majority_class)
@@ -184,7 +180,6 @@ with c_feat1:
         index=0,
     )
 with c_feat2:
-    # 기본값으로 첫 번째와 다른 속성 선택
     default_y_idx = 1 if len(selected_korean_features) > 1 else 0
     plot_y_korean = st.selectbox(
         "세로축 속성 선택",
@@ -198,7 +193,6 @@ plot_y_feat = reverse_feature_mapping[plot_y_korean]
 if plot_x_feat == plot_y_feat:
     st.warning("⚠️ 가로축과 세로축에 서로 다른 속성을 선택해 주세요.")
 else:
-    # 두 축 외의 속성은 테스트 데이터의 중앙값에 고정
     other_features = [f for f in selected_features if f not in [plot_x_feat, plot_y_feat]]
     fixed_values = {}
     fixed_desc_list = []
@@ -214,7 +208,6 @@ else:
             + " | ".join(fixed_desc_list)
         )
 
-    # 산점도 그리기 (Plotly)
     df_test_plot = df_test.copy()
     df_test_plot["실제_뇌졸중"] = df_test_plot["stroke"].map({0: "정상 (0)", 1: "뇌졸중 (1)"})
 
@@ -228,14 +221,12 @@ else:
         color_discrete_map={"정상 (0)": "#636EFA", "뇌졸중 (1)": "#EF553B"},
     )
 
-    # 로지스틱 회귀 경계선(Probability = 0.5) 그리기용 메쉬 그리드 생성
     x_min, x_max = df_test[plot_x_feat].min(), df_test[plot_x_feat].max()
     y_min, y_max = df_test[plot_y_feat].min(), df_test[plot_y_feat].max()
     xx, yy = np.meshgrid(
         np.linspace(x_min, x_max, 100), np.linspace(y_min, y_max, 100)
     )
 
-    # 전체 선택된 속성에 맞추어 그리드 데이터 구성
     grid_data = pd.DataFrame(index=np.arange(xx.ravel().shape[0]))
     for f in selected_features:
         if f == plot_x_feat:
@@ -245,18 +236,17 @@ else:
         else:
             grid_data[f] = fixed_values[f]
 
-    # 스케일링 적용 후 예측 확률 계산
     grid_scaled = scaler.transform(grid_data)
     probs = log_reg.predict_proba(grid_scaled)[:, 1].reshape(xx.shape)
 
-    # 경계선(0.5)을 Contour로 추가
+    # 결정 경계선 (0.5) 그리기 (showlines 속성 사용 수정 완료)
     fig.add_trace(
         go.Contour(
             z=probs,
             x=np.linspace(x_min, x_max, 100),
             y=np.linspace(y_min, y_max, 100),
             showscale=False,
-            contours=dict(coloring="lines", shoelines=True, start=0.5, end=0.5, size=0.1),
+            contours=dict(coloring="lines", showlines=True, start=0.5, end=0.5, size=0.1),
             line=dict(color="black", width=2, dash="dash"),
             name="결정 경계선 (0.5)",
         )
@@ -264,7 +254,6 @@ else:
 
     st.plotly_chart(fig, use_container_width=True)
 
-    # 선이 그림 범위 밖에 있는지 확인 안내
     if (xx.min() > x_max or xx.max() < x_min) or (yy.min() > y_max or yy.max() < y_min):
         st.markdown(
             "ℹ️ *참고: 계산된 결정 경계선이 현재 테스트 데이터의 표시 범위를 벗어나 있을 수 있습니다.*"
@@ -278,11 +267,6 @@ st.markdown(
     "의사결정트리 모델이 데이터를 분류하기 위해 던진 질문과 마디별 샘플 분포를 확인합니다."
 )
 
-# sklearn 트리에서 직접 DOT 문자열 생성
-from sklearn.tree import export_graphviz
-
-
-# 속성 이름을 우리말 이름으로 변경하여 DOT 생성
 korean_feature_names = [feature_mapping[f] for f in selected_features]
 
 dot_data = export_graphviz(
@@ -296,22 +280,18 @@ dot_data = export_graphviz(
     precision=2,
 )
 
-# st.graphviz_chart를 이용해 Streamlit 내장 기능으로 렌더링
 st.graphviz_chart(dot_data)
 
 # 9. 의사결정트리 분석 요약 정보
-# 실제로 트리가 사용한 속성 파악
 used_features_indices = dt_clf.tree_.feature
 used_features_names = [
     korean_feature_names[i] for i in used_features_indices if i != -2
 ]
 unique_used_features = list(set(used_features_names))
 
-# 리프 노드(답을 내는 마디) 개수와 정상/뇌졸중 판정 개수 계산
 is_leaf = dt_clf.tree_.children_left == -1
 leaf_values = dt_clf.tree_.value[is_leaf]
 total_leaves = int(np.sum(is_leaf))
-# 각 리프 노드에서 다수인 클래스가 0(정상/아님)인지 1(뇌졸중)인지 판정
 leaf_classes = np.argmax(leaf_values.squeeze(axis=1), axis=1)
 not_stroke_leaves = int(np.sum(leaf_classes == 0))
 
