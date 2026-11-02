@@ -8,7 +8,7 @@ st.set_page_config(
 )
 
 # 데이터 URL
-DATA_URL = "https://raw.githubusercontent.com/marcon0821/data/refs/main/stroke.csv"
+DATA_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/stroke.csv"
 LOCAL_FILE = "stroke.csv"
 
 
